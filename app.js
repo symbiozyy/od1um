@@ -18,7 +18,6 @@
       { id: 'drill-uk-medieval', title: 'DRILL UK MEDIEVAL', bpm: 141, dur: '2:37', src: 'beats/drill-uk-medieval.mp3' },
       { id: 'blend', title: 'BLEND', bpm: 145, dur: '2:12', src: 'beats/blend.mp3' },
       { id: 'jerk-drill-ny', title: 'JERK DRILL NY', bpm: 146, dur: '2:38', src: 'beats/jerk-drill-ny.mp3' },
-      { id: 'rage-cyber', title: 'RAGE CYBER', bpm: 150, dur: '2:21', src: 'beats/rage-cyber.mp3' },
       { id: 'diamond', title: 'DIAMOND', bpm: 157, dur: '2:02', src: 'beats/diamond.mp3' },
       { id: 'yeh-yeh', title: 'YEH YEH', bpm: 192, dur: '2:00', src: 'beats/yeh-yeh.mp3' },
     ],
@@ -568,7 +567,7 @@
       lines.forEach((ln, i) => {
         tl.to(ln, { yPercent: 0, opacity: 1, filter: 'blur(0px)', ease: 'expo.out' }, i * 2)
           .to(bars[i], { scaleX: 1, ease: 'none', duration: 2 }, i * 2);
-        if (i < lines.length - 1) tl.to(ln, { yPercent: -40, opacity: 0, filter: 'blur(10px)', ease: 'power3.in', duration: 0.7 }, i * 2 + 1.25);
+        if (i < lines.length - 1) tl.to(ln, { yPercent: -40, opacity: 0, filter: 'blur(10px)', ease: 'power3.in', duration: 0.5 }, i * 2 + 1.6);
       });
       tl.to({}, { duration: 0.6 });
     }

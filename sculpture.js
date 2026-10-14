@@ -306,7 +306,7 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
   // ── Estado ──────────────────────────────────────────────────────────────
   let progress = 0, level = 0, levelS = 0;
   const pointer = { x: 0, y: 0 }, pointerS = { x: 0, y: 0 };
-  let rotY = -0.4, time = 0, last = performance.now(), running = false, raf = 0;
+  let rotY = -0.45, time = 0, last = performance.now(), running = false, raf = 0;
   const S = { pulse: 1, amp: 0.6, glow: 0.7, bloom: 0.36 };
   let layout = { x: 0, y: 0, wide: true };
 
@@ -325,7 +325,7 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
     camera.position.set(0, 0, Math.max(needH / k, needW / (camera.aspect * k)));
     camera.updateProjectionMatrix();
     const visH = camera.position.z * k, visW = visH * camera.aspect;
-    layout = wide ? { x: visW * 0.2, y: visH * 0.03, wide } : { x: 0, y: visH * 0.17, wide };
+    layout = wide ? { x: visW * 0.25, y: visH * 0.03, wide } : { x: 0, y: visH * 0.17, wide };
     halo.scale.setScalar(Math.max(visW, visH) * 0.8);
     render();
   }
@@ -368,9 +368,13 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
     flameUniforms.uAmp.value = reduced ? 0 : Math.max(0.12, S.amp) * (1 + levelS * 0.8);
     bloom.strength = S.bloom + beat * 0.12 + levelS * 0.3;
 
-    // Giro: uma volta inteira ao longo da seção, terminando de frente
-    const idle = reduced ? 0 : Math.sin(time * 0.45) * 0.12;
-    const tgt = -0.4 * (1 - progress) + progress * Math.PI * 2 + idle + pointerS.x * 0.3;
+    // Giro limitado (no máximo ~35°), para a peça nunca ficar de perfil:
+    // Beat vira à esquerda, Voz à direita, Mix & Master termina de frente
+    const idle = reduced ? 0 : Math.sin(time * 0.45) * 0.1;
+    const sweep = progress < 0.5
+      ? THREE.MathUtils.lerp(-0.45, 0.6, smooth(0.05, 0.5, progress))
+      : THREE.MathUtils.lerp(0.6, 0, smooth(0.5, 0.92, progress));
+    const tgt = sweep + idle + pointerS.x * 0.3;
     rotY += (tgt - rotY) * Math.min(1, dt * 4.5);
     spin.rotation.y = rotY;
     spin.rotation.x = pointerS.y * 0.12 + (reduced ? 0 : Math.sin(time * 0.6) * 0.035);
