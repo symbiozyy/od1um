@@ -48,7 +48,7 @@
   const finePointer = matchMedia('(hover: hover) and (pointer: fine)').matches;
   const isMobile = () => innerWidth < 760;
 
-  gsap.registerPlugin(ScrollTrigger, SplitText, ScrollToPlugin);
+  gsap.registerPlugin(ScrollTrigger, SplitText, ScrollToPlugin, ScrambleTextPlugin);
   // Personalidade de movimento: energética nas interações, premium nas revelações
   gsap.defaults({ ease: 'expo.out', duration: 0.45 });
 
@@ -213,6 +213,46 @@
   gsap.ticker.add(() => { audioLevel = Engine.level(); });
 
   // ════════════════════════════════════════════════════════════════════════
+  // EFEITOS DE TEXTO: falha nos títulos e letras que embaralham
+  // ════════════════════════════════════════════════════════════════════════
+  // Falha rápida (~0,3 s): cópias vermelha e ciano deslocadas, fatias e tremor
+  function glitch(el) {
+    if (reduced || !el) return;
+    const rgb = (d) => `drop-shadow(${d}px 0 rgba(255,40,90,.85)) drop-shadow(${-d}px 0 rgba(0,229,255,.85))`;
+    gsap.timeline({ onComplete: () => gsap.set(el, { clearProps: 'filter,clipPath,x,skewX' }) })
+      .set(el, { filter: rgb(5), x: -6, skewX: 8, clipPath: 'inset(0% 0% 0% 0%)' })
+      .set(el, { x: 5, skewX: -6, clipPath: 'inset(12% 0% 44% 0%)' }, 0.05)
+      .set(el, { x: -3, skewX: 4, filter: rgb(3), clipPath: 'inset(52% 0% 6% 0%)' }, 0.1)
+      .set(el, { x: 2, skewX: 0, clipPath: 'inset(0% 0% 0% 0%)' }, 0.16)
+      .set(el, { x: 0, filter: rgb(1) }, 0.22)
+      .set(el, {}, 0.3);
+  }
+
+  // Letras embaralhadas, como um decodificador
+  const SCRAMBLE = 'ODIUM01#/<>_-=+*';
+  function scramble(el, duration = 0.8) {
+    if (reduced || !el) return;
+    const text = el.dataset.text || (el.dataset.text = el.textContent);
+    gsap.to(el, { duration, overwrite: true, scrambleText: { text, chars: SCRAMBLE, speed: 0.6, revealDelay: 0.15 } });
+  }
+  if (!reduced) {
+    // Rótulos (01 / SERVIÇOS…) embaralham na primeira vez que aparecem
+    const labelIO = new IntersectionObserver((entries) => entries.forEach((e) => {
+      if (!e.isIntersecting) return;
+      labelIO.unobserve(e.target);
+      scramble(e.target, 0.9);
+    }), { rootMargin: '0px 0px -10% 0px' });
+    $$('.label').forEach((el) => labelIO.observe(el));
+    // Menu e botões só com texto embaralham ao passar o mouse
+    if (finePointer) {
+      $$('.nav-links a, .nav-cta, .footer ul a, .to-top, .hero-ctas .btn').forEach((el) => {
+        if (el.children.length) return;
+        el.addEventListener('pointerenter', () => scramble(el, 0.5));
+      });
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
   // PRELOADER + INTRO DO HERÓI
   // ════════════════════════════════════════════════════════════════════════
   function heroIntro() {
@@ -241,7 +281,7 @@
       .fromTo(titleSplit.chars, { yPercent: 110, rotate: 6, opacity: 0 },
         { yPercent: 0, rotate: 0, opacity: 1, duration: 0.9, stagger: 0.035 }, 0.35)
       .fromTo('[data-hero]', { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, stagger: 0.08 }, 0.55)
-      .add(() => { titleSplit.revert(); lines.forEach((l) => l.classList.add(l.dataset.grad)); });
+      .add(() => { titleSplit.revert(); lines.forEach((l) => l.classList.add(l.dataset.grad)); glitch(heroTitle); });
     return tl;
   }
 
@@ -511,7 +551,7 @@
         gsap.from(split.lines, {
           yPercent: 115, duration: 0.9, stagger: 0.08, ease: 'expo.out',
           scrollTrigger: { trigger: el, start: 'top 85%', once: true },
-          onComplete: () => split.revert(),
+          onComplete: () => { split.revert(); glitch(el); },
         });
       });
       ScrollTrigger.refresh();
@@ -677,9 +717,31 @@
       }
     }
 
+    // Toca-discos: o vinil acelera ao tocar e desacelera ao pausar; o braço
+    // pousa no disco e anda para o centro conforme a faixa avança
+    const disc = $('[data-disc]', root), arm = $('[data-arm]', root);
+    const spin = gsap.to(disc, { rotation: 360, duration: 1.8, ease: 'none', repeat: -1, paused: true });
+    spin.timeScale(0);
+    gsap.set(arm, { rotation: -26, transformOrigin: '70% 9%' });
+    const armTo = gsap.quickTo(arm, 'rotation', { duration: reduced ? 0 : 0.9, ease: 'power2.inOut' });
+    let armAngle = -26;
+    function spinTo(on) {
+      if (reduced) return;
+      if (on) { spin.play(); gsap.to(spin, { timeScale: 1, duration: 0.9, ease: 'power2.out', overwrite: true }); }
+      else gsap.to(spin, { timeScale: 0, duration: 1.4, ease: 'power2.out', overwrite: true, onComplete: () => spin.pause() });
+    }
+
+    // Botão de play no topo do site, ao lado do logo
+    const heroPlay = $('[data-hero-play]');
+    const heroNp = $('[data-hero-np]');
+
     function setPlaying(on) {
       root.classList.toggle('is-playing', on);
+      document.documentElement.classList.toggle('beat-on', on);
       playBtn.setAttribute('aria-label', on ? 'Pausar' : 'Tocar');
+      heroPlay.setAttribute('aria-label', on ? `Pausar ${CONFIG.tracks[cur].title}` : 'Tocar um beat da ODIUM');
+      heroNp.textContent = CONFIG.tracks[cur].title;
+      spinTo(on);
       const lab = $('.cursor-ring span');
       if (lab) lab.textContent = on ? 'PAUSE' : 'PLAY';
     }
@@ -749,6 +811,8 @@
     });
     let lastSec = -1;
 
+    heroPlay.addEventListener('click', () => toggle());
+
     show(0);
 
     // Osciloscópio + barras
@@ -791,6 +855,8 @@
       timeEl.textContent = `${Math.floor(el / 60)}:${String(Math.floor(el % 60)).padStart(2, '0')} / ${CONFIG.tracks[cur].dur}`;
       progEl.style.transform = `scaleX(${p.toFixed(4)})`;
       seekBar.style.setProperty('--p', p.toFixed(4));
+      const armTarget = loaded && Engine.busy ? 4 + p * 16 : -26;
+      if (Math.abs(armTarget - armAngle) > 0.05) { armAngle = armTarget; armTo(armTarget); }
       if (Math.floor(el) !== lastSec) {
         lastSec = Math.floor(el);
         seekBar.setAttribute('aria-valuenow', Math.round(p * 100));
@@ -1128,6 +1194,31 @@
         c.addEventListener('pointerleave', () => { rx(0); ry(0); });
       });
     }
+    // Vinil escondido atrás de cada capa: desliza para fora girando no hover
+    $$('.cover').forEach((c) => {
+      const v = document.createElement('span');
+      v.className = 'vinyl';
+      v.setAttribute('aria-hidden', 'true');
+      v.innerHTML = '<span class="vinyl-disc"><span class="vinyl-label"></span></span>';
+      $('.vinyl-label', v).style.setProperty('--art', `url("${$('img', c).getAttribute('src')}")`);
+      c.insertBefore(v, c.firstChild);
+      if (!finePointer || reduced) return;
+      const spin = gsap.to($('.vinyl-disc', v), { rotation: 360, duration: 2.2, ease: 'none', repeat: -1, paused: true });
+      spin.timeScale(0);
+      c.addEventListener('pointerenter', () => {
+        // Capas da direita soltam o vinil para a esquerda, para não sair da tela
+        const r = c.getBoundingClientRect();
+        const dir = r.left + r.width / 2 > innerWidth * 0.6 ? -1 : 1;
+        gsap.to(v, { xPercent: 42 * dir, duration: 0.7, ease: 'expo.out', overwrite: true });
+        spin.play();
+        gsap.to(spin, { timeScale: 1, duration: 0.5, overwrite: true });
+      });
+      c.addEventListener('pointerleave', () => {
+        gsap.to(v, { xPercent: 0, duration: 0.5, ease: 'power3.inOut', overwrite: true });
+        gsap.to(spin, { timeScale: 0, duration: 0.6, overwrite: true, onComplete: () => spin.pause() });
+      });
+    });
+
     const lb = $('[data-lightbox]');
     const lbImg = $('img', lb);
     $$('[data-cover]').forEach((b) => b.addEventListener('click', () => {
@@ -1240,8 +1331,23 @@
       if ((c && c.saveData) || (navigator.deviceMemory && navigator.deviceMemory <= 2)) return;
       (window.requestIdleCallback || ((fn) => setTimeout(fn, 1500)))(() => loadSculpture(), { timeout: 6000 });
     };
+    // Depois da abertura: o logo pulsa com o grave do beat e o título falha de vez em quando
+    const afterIntro = () => {
+      setTimeout(preload, 1200);
+      if (reduced) return;
+      const logo = $('[data-hero-logo]');
+      const setSX = gsap.quickSetter(logo, 'scaleX'), setSY = gsap.quickSetter(logo, 'scaleY');
+      let sc = 1;
+      gsap.ticker.add(() => { sc += (1 + audioLevel * 0.05 - sc) * 0.25; setSX(sc); setSY(sc); });
+      const title = $('[data-hero-title]');
+      const loop = () => {
+        if (scrollY < innerHeight * 0.5 && !document.hidden) glitch(title);
+        gsap.delayedCall(6 + Math.random() * 5, loop);
+      };
+      gsap.delayedCall(7, loop);
+    };
     const intro = heroIntro();
-    if (intro) intro.eventCallback('onComplete', () => setTimeout(preload, 1200)); else setTimeout(preload, 2500);
+    if (intro) intro.eventCallback('onComplete', afterIntro); else setTimeout(afterIntro, 2500);
     startFlames();
     ScrollTrigger.refresh();
   });
