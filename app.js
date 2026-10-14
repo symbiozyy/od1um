@@ -18,6 +18,18 @@
       { id: 'chrome', title: 'Chrome Heart', style: 'Drill', bpm: 142, key: 'Cm', src: '' },
       { id: 'veneno', title: 'Veneno', style: 'Boom bap', bpm: 90, key: 'Am', src: '' },
     ],
+    // Músicas produzidas pela ODIUM: cole o link de compartilhamento do Spotify.
+    spotify: [
+      'https://open.spotify.com/track/0Y0h17YOwW9qK306XMAsrw',
+      'https://open.spotify.com/track/5Yy1DZPDTJQ545WnuKH9jS',
+      'https://open.spotify.com/track/1qH0oACa3x9k0WxfPADuD9',
+      'https://open.spotify.com/track/2UoK7FpvVBzXr2E26MGPAd',
+      'https://open.spotify.com/track/5TSiqeBeOznRSgiCAsDWho',
+    ],
+    // Clipes: link do YouTube ou arquivo de vídeo próprio. Vazio esconde a seção.
+    // Ex.: { title: 'Nome do clipe', youtube: 'https://youtu.be/XXXXXXXXXXX' }
+    //      { title: 'Nome do clipe', src: 'videos/clipe.mp4', poster: 'videos/capa.jpg' }
+    videos: [],
   };
 
   const $ = (s, r = document) => r.querySelector(s);
@@ -452,7 +464,7 @@
       const hov = e.target.closest('a, button, input, select, textarea, label, .track');
       ring.classList.toggle('is-label', !!lab);
       ring.classList.toggle('is-hover', !lab && !!hov);
-      if (lab) $('span', ring).textContent = Engine.playing ? 'PAUSE' : 'PLAY';
+      if (lab) $('span', ring).textContent = lab.dataset.cursor === 'play' && lab.closest('[data-player]') ? (Engine.playing ? 'PAUSE' : 'PLAY') : lab.dataset.cursor.toUpperCase();
     });
     document.documentElement.addEventListener('mouseleave', () => gsap.to([dot, ring], { opacity: 0, duration: 0.2 }));
     document.documentElement.addEventListener('mouseenter', () => gsap.to([dot, ring], { opacity: 1, duration: 0.2 }));
@@ -1047,6 +1059,113 @@
     });
 
     render(true);
+  })();
+
+  // ════════════════════════════════════════════════════════════════════════
+  // PRODUÇÕES: Spotify, capas (com zoom) e clipes
+  // ════════════════════════════════════════════════════════════════════════
+  (function works() {
+    // Spotify: os players só carregam quando a seção se aproxima
+    const sp = $('[data-spotify]');
+    const ids = CONFIG.spotify
+      .map((u) => (/(track|album|playlist)\/([A-Za-z0-9]+)/.exec(u) || []).slice(1))
+      .filter((m) => m.length === 2);
+    ids.forEach(([kind, id]) => {
+      const card = document.createElement('div');
+      card.className = 'sp-card';
+      card.dataset.src = `https://open.spotify.com/embed/${kind}/${id}?utm_source=generator&theme=0`;
+      sp.appendChild(card);
+    });
+    const spIO = new IntersectionObserver((entries) => {
+      entries.forEach((e) => {
+        if (!e.isIntersecting) return;
+        spIO.unobserve(e.target);
+        const f = document.createElement('iframe');
+        f.src = e.target.dataset.src;
+        f.title = 'Player do Spotify';
+        f.allow = 'autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
+        f.loading = 'lazy';
+        f.addEventListener('load', () => e.target.classList.add('is-loaded'));
+        e.target.appendChild(f);
+      });
+    }, { rootMargin: '400px 0px' });
+    $$('.sp-card', sp).forEach((c) => spIO.observe(c));
+    if (!reduced) {
+      ScrollTrigger.batch($$('.sp-card', sp), {
+        start: 'top 92%', once: true,
+        onEnter: (els) => gsap.fromTo(els, { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.7, stagger: 0.07 }),
+      });
+    }
+
+    // Capas: inclinação 3D seguindo o mouse e zoom em tela cheia
+    if (finePointer && !reduced) {
+      $$('.cover').forEach((c) => {
+        const rx = gsap.quickTo(c, 'rotationX', { duration: 0.5, ease: 'power3' });
+        const ry = gsap.quickTo(c, 'rotationY', { duration: 0.5, ease: 'power3' });
+        gsap.set(c, { transformPerspective: 900 });
+        c.addEventListener('pointermove', (e) => {
+          const r = c.getBoundingClientRect();
+          ry(((e.clientX - r.left) / r.width - 0.5) * 12);
+          rx(-((e.clientY - r.top) / r.height - 0.5) * 12);
+        });
+        c.addEventListener('pointerleave', () => { rx(0); ry(0); });
+      });
+    }
+    const lb = $('[data-lightbox]');
+    const lbImg = $('img', lb);
+    $$('[data-cover]').forEach((b) => b.addEventListener('click', () => {
+      lbImg.src = b.dataset.cover;
+      lbImg.alt = $('img', b).alt;
+      lb.showModal();
+      document.body.style.overflow = 'hidden';
+      if (!reduced) gsap.fromTo(lbImg, { scale: 0.9, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.45 });
+    }));
+    const closeLb = () => lb.close();
+    $('[data-lightbox-close]').addEventListener('click', closeLb);
+    lb.addEventListener('click', (e) => { if (e.target === lb) closeLb(); });
+    lb.addEventListener('close', () => { document.body.style.overflow = ''; });
+
+    // Clipes: miniatura leve; o player do YouTube só carrega ao clicar
+    const vids = CONFIG.videos.filter((v) => v.youtube || v.src);
+    if (!vids.length) return;
+    $('[data-videos-wrap]').hidden = false;
+    const box = $('[data-videos]');
+    const ytId = (u) => (/(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/.exec(u) || [])[1] || (/^[A-Za-z0-9_-]{11}$/.test(u) ? u : '');
+    vids.forEach((v) => {
+      const fig = document.createElement('figure');
+      fig.className = 'video';
+      fig.setAttribute('data-card', '');
+      if (v.src) {
+        const el = document.createElement('video');
+        el.src = v.src; el.controls = true; el.preload = 'metadata'; el.playsInline = true;
+        if (v.poster) el.poster = v.poster;
+        fig.appendChild(el);
+      } else {
+        const id = ytId(v.youtube);
+        if (!id) return;
+        const btn = document.createElement('button');
+        btn.type = 'button'; btn.className = 'video-btn';
+        btn.setAttribute('aria-label', `Assistir ${v.title || 'clipe'}`);
+        btn.dataset.cursor = 'play';
+        btn.innerHTML = `<img src="https://i.ytimg.com/vi/${id}/hqdefault.jpg" alt="" loading="lazy"><span class="play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg></span>`;
+        btn.addEventListener('click', () => {
+          if (Engine.playing) { Engine.stop(); $('[data-player]').classList.remove('is-playing'); }
+          const f = document.createElement('iframe');
+          f.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
+          f.title = v.title || 'Clipe';
+          f.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen';
+          f.allowFullscreen = true;
+          fig.replaceChildren(f);
+        });
+        fig.appendChild(btn);
+      }
+      if (v.title) {
+        const cap = document.createElement('figcaption');
+        cap.textContent = v.title;
+        fig.appendChild(cap);
+      }
+      box.appendChild(fig);
+    });
   })();
 
   // ── Início ───────────────────────────────────────────────────────────────
