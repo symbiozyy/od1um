@@ -321,7 +321,13 @@
   // PRELOADER + INTRO DO HERÓI
   // ════════════════════════════════════════════════════════════════════════
   function heroIntro() {
-    if (reduced) { gsap.set(['[data-hero]', '[data-hero-logo]'], { opacity: 1 }); return; }
+    if (reduced) {
+      // Movimento reduzido: só fades, sem deslocamento nem escala
+      return gsap.timeline({ defaults: { ease: 'power1.out', duration: 0.5 } })
+        .fromTo('[data-hero-logo]', { opacity: 0 }, { opacity: 1 })
+        .fromTo('[data-hero-title]', { opacity: 0 }, { opacity: 1 }, 0.15)
+        .fromTo('[data-hero]', { opacity: 0 }, { opacity: 1, stagger: 0.08 }, 0.3);
+    }
     // Divide o título só depois das fontes carregarem; o degradê vai para cada letra
     const heroTitle = $('[data-hero-title]');
     const titleSplit = SplitText.create(heroTitle.querySelectorAll('.line'), { type: 'chars', charsClass: 'ch' });
@@ -352,9 +358,10 @@
   function runLoader() {
     const loader = $('.loader');
     if (reduced) {
-      loader.remove();
-      gsap.set(['[data-hero]', '[data-hero-logo]'], { opacity: 1 });
-      return Promise.resolve();
+      $('[data-count]', loader).textContent = '100';
+      return new Promise((resolve) => {
+        gsap.to(loader, { opacity: 0, duration: 0.4, delay: 0.35, ease: 'power1.out', onStart: resolve, onComplete: () => loader.remove() });
+      });
     }
     const bars = $$('.loader-meter i', loader);
     const count = $('[data-count]', loader);
@@ -556,7 +563,19 @@
   const mm = gsap.matchMedia();
   mm.add({ motion: '(prefers-reduced-motion: no-preference)', desktop: '(min-width: 960px)' }, (ctx) => {
     const { motion, desktop } = ctx.conditions;
-    if (!motion) return;
+    if (!motion) {
+      // Movimento reduzido: conteúdo entra só com fade, sem deslocamento
+      const fadeEls = '[data-split], [data-reveal], [data-card], .m-line, .step';
+      const els = $$(fadeEls);
+      gsap.set(els, { opacity: 0 });
+      const io = new IntersectionObserver((entries) => {
+        const shown = entries.filter((e) => e.isIntersecting).map((e) => e.target);
+        shown.forEach((el) => io.unobserve(el));
+        if (shown.length) gsap.to(shown, { opacity: 1, duration: 0.4, stagger: 0.05, ease: 'power1.out', overwrite: true });
+      }, { rootMargin: '0px 0px -6% 0px' });
+      els.forEach((el) => io.observe(el));
+      return () => { io.disconnect(); gsap.set(els, { opacity: 1 }); };
+    }
 
     // Títulos: linhas sobem de dentro da máscara. Divididos depois das fontes;
     // ao terminar, o HTML original volta (acentos e quebras de linha intactos).
