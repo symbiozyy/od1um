@@ -37,8 +37,9 @@ mix & master, mentoria de lançamento e audiovisual (capas e identidade visual).
   - primária: título ou card
   - secundária: brilho cromado, contadores
   - ambiente: onda de áudio, grão, chamas tremulando
-- **Acessibilidade:** com `prefers-reduced-motion`, tudo aparece pronto, sem
-  movimento (`gsap.matchMedia`). Sem JavaScript, o conteúdo continua legível.
+- **Acessibilidade:** com `prefers-reduced-motion`, o conteúdo entra só com
+  fades, sem deslocamento nem escala (`gsap.matchMedia`). Sem JavaScript, o
+  conteúdo continua legível.
 
 ## 3. Estrutura da página
 
@@ -88,10 +89,10 @@ mix & master, mentoria de lançamento e audiovisual (capas e identidade visual).
 
 ## 4. Técnica
 
-- Site estático, sem build, pronto para o GitHub Pages: `index.html` com
-  CSS e JS no próprio arquivo.
+- Site estático, sem build, pronto para o GitHub Pages: `index.html` (HTML e
+  CSS), `app.js` (lógica da página) e `sculpture.js` (escultura 3D).
 - Bibliotecas copiadas para `vendor/`, assim o site não depende de CDN:
-  - GSAP 3.13 (core, ScrollTrigger, SplitText)
+  - GSAP 3.13 (core, ScrollTrigger, SplitText, ScrollToPlugin)
   - Three.js r160
 - Configuração editável no topo do script (`CONFIG`):
   - WhatsApp, Instagram, e-mail

@@ -21,7 +21,8 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Anton&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"></noscript>
 <link rel="preload" as="image" href="assets/odium-logo.webp">
 <script type="importmap">{"imports":{"three":"./vendor/three.module.min.js"}}</script>
 <script>document.documentElement.classList.add('js')</script>
@@ -30,7 +31,7 @@
 :root{
   --bg:#080908; --bg-2:#0d0f0c; --panel:#121510; --panel-2:#171b14;
   --line:#23281f; --line-2:#323a2b;
-  --fg:#eef1ea; --muted:#a3ab9b; --dim:#6f7768;
+  --fg:#eef1ea; --muted:#a3ab9b; --dim:#868e7f;
   --acid:#8fc63a; --acid-hi:#c6ec80; --acid-deep:#659b14; --acid-dark:#234b00;
   --chrome-hi:#f4f4f2; --chrome:#c7c9c5; --chrome-lo:#7b7e79;
   --danger:#ff5c4d;
@@ -201,10 +202,13 @@ section[id],footer[id]{scroll-margin-top:72px}
 .sculpture-fallback{position:absolute;left:50%;top:42%;width:min(380px,60vw);transform:translate(-50%,-50%);opacity:.9;display:none}
 .no-webgl .sculpture-fallback{display:block}
 .manifesto-text{position:relative;z-index:1;align-self:end;padding-bottom:clamp(36px,8vh,80px)}
-.manifesto-lines{position:relative;height:clamp(150px,24vw,280px)}
-.m-line{position:absolute;left:0;right:0;bottom:0;font-family:var(--f-display);text-transform:uppercase;font-weight:400;font-size:clamp(54px,10vw,150px);line-height:.92;margin:0}
+.manifesto-lines{position:relative}
+.js .manifesto-lines{height:clamp(150px,24vw,280px)}
+.js .no-js-lines{height:auto}
+.js .m-line{position:absolute;left:0;right:0;bottom:0}
+.m-line{font-family:var(--f-display);text-transform:uppercase;font-weight:400;font-size:clamp(54px,10vw,150px);line-height:.92;margin:0}
 .m-num{display:inline-block;vertical-align:top;margin:.2em .5em 0 0;font-family:var(--f-mono);font-size:max(12px,.12em);letter-spacing:.14em;color:var(--acid)}
-.no-js-lines .m-line{position:static}
+.js .no-js-lines .m-line{position:static}
 .manifesto-progress{display:flex;gap:8px;margin-top:22px}
 .manifesto-progress i{display:block;height:2px;flex:1;max-width:80px;background:var(--line-2);position:relative;overflow:hidden}
 .manifesto-progress i b{position:absolute;inset:0;background:var(--acid);transform:scaleX(0);transform-origin:left}
@@ -411,6 +415,14 @@ section[id],footer[id]{scroll-margin-top:72px}
 @media (min-width:860px){.footer-in{grid-template-columns:1.2fr 1fr 1fr;align-items:start}}
 .footer-brand{display:flex;gap:14px;align-items:center}
 .footer-brand img{width:56px}
+.credit{display:inline-flex;align-items:center;gap:12px;margin-top:24px;padding:10px 16px 10px 10px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.02);transition:border-color .2s,background-color .2s}
+.credit:hover{border-color:rgba(91,140,255,.45);background:rgba(91,140,255,.06)}
+.credit img{width:40px;height:40px;border-radius:10px;flex:none}
+.credit small{display:block;font-family:var(--f-mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}
+.credit b{display:block;font-size:15px;font-weight:600;color:var(--fg);margin-top:2px}
+.credit em{display:block;font-style:normal;font-size:12px;color:var(--muted);margin-top:2px}
+.footer .credit:hover b{color:#8fb0ff}
+.credit u{display:block;text-decoration:none;font-family:var(--f-mono);font-size:11px;letter-spacing:.04em;color:#8fb0ff;margin-top:4px}
 .footer-brand b{font-family:var(--f-display);font-weight:400;font-size:30px;letter-spacing:.06em;display:block;line-height:1}
 .footer-brand span{font-size:14px;color:var(--muted)}
 .footer h4{font-family:var(--f-mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin:0 0 14px;font-weight:500}
@@ -850,8 +862,8 @@ section[id],footer[id]{scroll-margin-top:72px}
           <div class="row2">
             <div class="field">
               <label for="f-nome">Seu nome *</label>
-              <input id="f-nome" name="nome" autocomplete="name" required>
-              <span class="field-err">Conta pra gente o seu nome.</span>
+              <input id="f-nome" name="nome" autocomplete="name" required aria-describedby="f-nome-err">
+              <span class="field-err" id="f-nome-err">Conta pra gente o seu nome.</span>
             </div>
             <div class="field">
               <label for="f-artista">Nome artístico</label>
@@ -906,9 +918,20 @@ section[id],footer[id]{scroll-margin-top:72px}
 <footer class="footer">
   <div class="wrap">
     <div class="footer-in">
-      <div class="footer-brand">
-        <img src="assets/odium-logo.webp" alt="" width="820" height="863">
-        <div><b class="chrome-text">ODIUM</b><span>Produtora de áudio, som &amp; imagem</span></div>
+      <div>
+        <div class="footer-brand">
+          <img src="assets/odium-logo.webp" alt="" width="820" height="863">
+          <div><b class="chrome-text">ODIUM</b><span>Produtora de áudio, som &amp; imagem</span></div>
+        </div>
+        <a class="credit" href="https://symbiozyy.github.io/amplitude-lab/" target="_blank" rel="noopener">
+          <img src="assets/amplitude-lab.png" alt="" width="40" height="40">
+          <span>
+            <small>Criado por</small>
+            <b>Amplitude Lab</b>
+            <em>Laboratório de experiências digitais</em>
+            <u>symbiozyy.github.io/amplitude-lab ↗</u>
+          </span>
+        </a>
       </div>
       <div>
         <h4>Navegação</h4>

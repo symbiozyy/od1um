@@ -92,7 +92,7 @@
   // ════════════════════════════════════════════════════════════════════════
   const Engine = (() => {
     let ctx, master, analyser, freq, wave;
-    let playing = false, track = null, volume = 0.8, endedCb = null;
+    let playing = false, pending = false, req = 0, track = null, volume = 0.8, endedCb = null;
     const media = new Map();
 
     function init() {
@@ -119,29 +119,58 @@
       return media.get(t.id);
     }
     const el = () => (track && media.has(track.id) ? media.get(track.id).el : null);
-
-    // Mesma faixa: continua de onde parou. Outra faixa: começa do início.
-    async function play(t) {
-      init();
-      if (ctx.state === 'suspended') await ctx.resume();
-      const same = track && track.id === t.id;
-      stop();
-      track = t;
-      const m = getMedia(t);
-      if (!same || m.el.ended) m.el.currentTime = 0;
-      await m.el.play();
-      playing = true;
+    // Vários visualizadores pedem o espectro a cada quadro: lê o analisador uma vez só
+    let sampledFrame = -1;
+    function sampleFreq() {
+      if (sampledFrame === gsap.ticker.frame) return;
+      sampledFrame = gsap.ticker.frame;
+      analyser.getByteFrequencyData(freq);
     }
 
-    function stop() {
+    function pauseCurrent() {
       const e = el();
       if (e) e.pause();
       playing = false;
     }
 
+    // Mesma faixa: continua de onde parou. Outra faixa: começa do início.
+    // Cada chamada recebe um número; se outra chamada (ou um stop) vier antes de
+    // o áudio carregar, esta desiste em silêncio e retorna false.
+    async function play(t) {
+      const my = ++req;
+      pending = true;
+      init();
+      if (ctx.state === 'suspended') await ctx.resume();
+      if (my !== req) return false;
+      const same = track && track.id === t.id;
+      pauseCurrent();
+      track = t;
+      const m = getMedia(t);
+      if (!same || m.el.ended) m.el.currentTime = 0;
+      try {
+        await m.el.play();
+      } catch (e) {
+        if (my !== req || e.name === 'AbortError') return false;
+        pending = false;
+        throw e;
+      }
+      if (my !== req) return false;
+      pending = false;
+      playing = true;
+      return true;
+    }
+
+    function stop() {
+      req++;
+      pending = false;
+      pauseCurrent();
+    }
+
     return {
       play, stop,
       get playing() { return playing; },
+      // Tocando ou carregando para tocar: para a interface, conta como "tocando"
+      get busy() { return playing || pending; },
       get trackId() { return track ? track.id : null; },
       set onEnded(fn) { endedCb = fn; },
       setVolume(v) { volume = v; if (master) master.gain.setTargetAtTime(v, ctx.currentTime, 0.02); },
@@ -152,11 +181,11 @@
       // Energia dos graves (0 a 1) para o coração 3D e o fundo do herói pulsarem
       level() {
         if (!playing || !analyser) return 0;
-        analyser.getByteFrequencyData(freq);
+        sampleFreq();
         let sum = 0; for (let i = 1; i < 12; i++) sum += freq[i];
         return Math.max(0, (sum / 11 / 255 - 0.35) / 0.65);
       },
-      spectrum() { if (!analyser) return null; analyser.getByteFrequencyData(freq); return freq; },
+      spectrum() { if (!analyser) return null; sampleFreq(); return freq; },
       waveform() { if (!analyser) return null; analyser.getByteTimeDomainData(wave); return wave; },
     };
   })();
@@ -201,13 +230,18 @@
       c.classList.add(c.closest('.line').classList.contains('acid-text') ? 'acid-text' : 'chrome-text');
       c.style.display = 'inline-block';
     });
-    heroTitle.querySelectorAll('.line').forEach((l) => { l.classList.remove('chrome-text', 'acid-text'); });
+    const lines = [...heroTitle.querySelectorAll('.line')];
+    lines.forEach((l) => {
+      l.dataset.grad = l.classList.contains('acid-text') ? 'acid-text' : 'chrome-text';
+      l.classList.remove('chrome-text', 'acid-text');
+    });
     const tl = gsap.timeline({ defaults: { ease: 'expo.out' } });
     tl.fromTo('[data-hero-logo]', { scale: 0.86, opacity: 0, filter: 'blur(18px) brightness(2)' },
       { scale: 1, opacity: 1, filter: 'blur(0px) brightness(1)', duration: 1.2 })
       .fromTo(titleSplit.chars, { yPercent: 110, rotate: 6, opacity: 0 },
         { yPercent: 0, rotate: 0, opacity: 1, duration: 0.9, stagger: 0.035 }, 0.35)
-      .fromTo('[data-hero]', { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, stagger: 0.08 }, 0.55);
+      .fromTo('[data-hero]', { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.8, stagger: 0.08 }, 0.55)
+      .add(() => { titleSplit.revert(); lines.forEach((l) => l.classList.add(l.dataset.grad)); });
     return tl;
   }
 
@@ -293,7 +327,10 @@
     menu.setAttribute('aria-hidden', String(!open));
     nav.classList.remove('is-hidden');
     document.body.style.overflow = open ? 'hidden' : '';
-    if (open) menuTl.timeScale(1).play(); else menuTl.timeScale(1.6).reverse();
+    // Com o menu aberto, o resto da página fica fora do alcance do Tab e dos leitores de tela
+    ['#conteudo', '.footer'].forEach((sel) => { const el = $(sel); if (el) el.inert = open; });
+    if (open) { menuTl.timeScale(1).play(); setTimeout(() => $('a', menu).focus(), 300); }
+    else { menuTl.timeScale(1.6).reverse(); burger.focus({ preventScroll: true }); }
   }
   burger.addEventListener('click', () => setMenu(!menuOpen));
   $$('a', menu).forEach((a) => a.addEventListener('click', () => setMenu(false)));
@@ -308,9 +345,10 @@
     const target = id.length > 1 && document.querySelector(id);
     if (!target) return;
     e.preventDefault();
-    const y = id === '#inicio' ? 0 : target;
+    const pin = id === '#processo' && ScrollTrigger.getAll().find((t) => t.pin === target);
+    const y = id === '#inicio' ? 0 : pin ? pin.start : target;
     gsap.to(window, {
-      scrollTo: { y, offsetY: id === '#inicio' ? 0 : 72, autoKill: false },
+      scrollTo: { y, offsetY: id === '#inicio' || pin ? 0 : 72, autoKill: false },
       duration: reduced ? 0 : 1.1, ease: 'power3.inOut', overwrite: true,
     });
     history.pushState(null, '', id);
@@ -429,10 +467,12 @@
     while (track.scrollWidth < innerWidth * 2.2) track.appendChild(group.cloneNode(true));
     if (reduced) return;
     const dir = Number(mq.dataset.marquee);
-    let x = 0, boost = 0;
+    let x = 0, boost = 0, gw = group.offsetWidth, onScreen = true;
+    addEventListener('resize', () => { gw = group.offsetWidth; });
+    new IntersectionObserver(([e]) => { onScreen = e.isIntersecting; }).observe(mq);
     const setX = gsap.quickSetter(track, 'x', 'px');
     gsap.ticker.add((time, dt) => {
-      const gw = group.offsetWidth;
+      if (!onScreen) return;
       x -= (0.06 + boost) * dt * dir;
       x = gsap.utils.wrap(-gw, 0, x);
       setX(x);
@@ -464,7 +504,7 @@
     // Títulos: linhas sobem de dentro da máscara. Divididos depois das fontes;
     // ao terminar, o HTML original volta (acentos e quebras de linha intactos).
     gsap.set('[data-split]', { opacity: 0 });
-    fontsReady.then(() => {
+    fontsReady.then(() => ctx.add(() => {
       $$('[data-split]').forEach((el) => {
         const split = SplitText.create(el, { type: 'lines', mask: 'lines', linesClass: 'ln' });
         gsap.set(el, { opacity: 1 });
@@ -475,7 +515,7 @@
         });
       });
       ScrollTrigger.refresh();
-    });
+    }));
 
     gsap.set('[data-reveal]', { y: 40, opacity: 0 });
     ScrollTrigger.batch('[data-reveal]', {
@@ -513,13 +553,13 @@
       const tween = gsap.to(trackEl, {
         x: () => -dist(), ease: 'none',
         scrollTrigger: {
-          trigger: proc, start: 'top top', end: () => '+=' + dist(), pin: true, scrub: 0.6,
+          trigger: proc, start: 'top top', end: () => '+=' + dist(), pin: true, scrub: 0.6, refreshPriority: 1,
           invalidateOnRefresh: true, anticipatePin: 1,
         },
       });
       gsap.to('.process-progress b', {
         scaleX: 1, ease: 'none',
-        scrollTrigger: { trigger: proc, start: 'top top', end: () => '+=' + dist(), scrub: true, invalidateOnRefresh: true },
+        scrollTrigger: { trigger: proc, start: 'top top', end: () => '+=' + dist(), scrub: true, invalidateOnRefresh: true, refreshPriority: 1 },
       });
       $$('.step', proc).forEach((st) => {
         gsap.fromTo($('.step-bar', st), { scaleX: 0 }, {
@@ -580,9 +620,10 @@
       started = true;
       io.disconnect();
       import('./sculpture.js')
-        .then((m) => {
-          sculpture = m.mount(canvas, { reduced, mobile: isMobile() });
-          if (!sculpture) throw new Error('webgl');
+        .then((m) => m.mount(canvas, { reduced, mobile: isMobile() }))
+        .then((s) => {
+          if (!s) throw new Error('webgl');
+          sculpture = s;
           sculpture.setProgress(lastP);
           gsap.ticker.add(() => {
             sculpture.setPointer(pointer.nx, pointer.ny);
@@ -648,10 +689,9 @@
     async function playTrack(i) {
       show(i);
       Playback.claim('beats');
+      setPlaying(true);
       try {
-        await Engine.play(CONFIG.tracks[cur]);
-        setPlaying(true);
-        gsap.fromTo(playBtn, { scale: 0.9 }, { scale: 1, duration: 0.5, ease: 'back.out(3)' });
+        if (await Engine.play(CONFIG.tracks[cur])) gsap.fromTo(playBtn, { scale: 0.9 }, { scale: 1, duration: 0.5, ease: 'back.out(3)' });
       } catch (e) {
         setPlaying(false);
         Playback.release('beats');
@@ -659,16 +699,16 @@
       }
     }
     function toggle() {
-      if (Engine.playing) { Engine.stop(); setPlaying(false); Playback.release('beats'); } else playTrack(cur);
+      if (Engine.busy) { Engine.stop(); setPlaying(false); Playback.release('beats'); } else playTrack(cur);
     }
 
     playBtn.addEventListener('click', toggle);
     screen.addEventListener('click', toggle);
-    $('[data-next]', root).addEventListener('click', () => (Engine.playing ? playTrack(cur + 1) : show(cur + 1)));
-    $('[data-prev]', root).addEventListener('click', () => (Engine.playing ? playTrack(cur - 1) : show(cur - 1)));
+    $('[data-next]', root).addEventListener('click', () => (Engine.busy ? playTrack(cur + 1) : show(cur + 1)));
+    $('[data-prev]', root).addEventListener('click', () => (Engine.busy ? playTrack(cur - 1) : show(cur - 1)));
     btns.forEach((b) => b.addEventListener('click', () => {
       const i = Number(b.dataset.i);
-      if (i === cur && Engine.playing) toggle(); else playTrack(i);
+      if (i === cur && Engine.busy) toggle(); else playTrack(i);
     }));
     $('[data-volume]', root).addEventListener('input', (e) => Engine.setVolume(Number(e.target.value)));
     document.addEventListener('keydown', (e) => {
@@ -677,7 +717,7 @@
       if (r.top < innerHeight && r.bottom > 0) { e.preventDefault(); toggle(); }
     });
     // Para o som ao sair da aba
-    document.addEventListener('visibilitychange', () => { if (document.hidden && Engine.playing) { Engine.stop(); setPlaying(false); Playback.release('beats'); } });
+    document.addEventListener('visibilitychange', () => { if (document.hidden && Engine.busy) { Engine.stop(); setPlaying(false); Playback.release('beats'); } });
 
     // Fim da faixa: segue para a próxima
     Engine.onEnded = () => {
@@ -695,7 +735,7 @@
       const ratio = ratioAt(e);
       dragging = true;
       seekBar.setPointerCapture(e.pointerId);
-      if (!isLoaded() || !Engine.playing) await playTrack(cur);
+      if (!isLoaded() || !Engine.busy) await playTrack(cur);
       Engine.seek(ratio);
     });
     seekBar.addEventListener('pointermove', (e) => { if (dragging && isLoaded()) Engine.seek(ratioAt(e)); });
@@ -704,7 +744,10 @@
       if (!isLoaded()) return;
       if (e.key === 'ArrowRight') { e.preventDefault(); Engine.nudge(5); }
       if (e.key === 'ArrowLeft') { e.preventDefault(); Engine.nudge(-5); }
+      if (e.key === 'Home') { e.preventDefault(); Engine.seek(0); }
+      if (e.key === 'End') { e.preventDefault(); Engine.seek(0.99); }
     });
+    let lastSec = -1;
 
     show(0);
 
@@ -748,7 +791,11 @@
       timeEl.textContent = `${Math.floor(el / 60)}:${String(Math.floor(el % 60)).padStart(2, '0')} / ${CONFIG.tracks[cur].dur}`;
       progEl.style.transform = `scaleX(${p.toFixed(4)})`;
       seekBar.style.setProperty('--p', p.toFixed(4));
-      seekBar.setAttribute('aria-valuenow', Math.round(p * 100));
+      if (Math.floor(el) !== lastSec) {
+        lastSec = Math.floor(el);
+        seekBar.setAttribute('aria-valuenow', Math.round(p * 100));
+        seekBar.setAttribute('aria-valuetext', `${timeEl.textContent.replace(' / ', ' de ')}`);
+      }
     }
     gsap.ticker.add(draw);
   })();
@@ -831,6 +878,7 @@
         $('input', row).checked = n > 0;
         const out = $('output', row);
         if (out) out.textContent = Math.max(1, n);
+        $$('.stepper button', row).forEach((b) => { b.disabled = n === 0; });
       });
       // Botões dos cards de preço
       $$('[data-add]').forEach((b) => {
@@ -932,6 +980,7 @@
       const nome = $('#f-nome');
       const field = nome.closest('.field');
       field.classList.toggle('is-error', !nome.value.trim());
+      nome.setAttribute('aria-invalid', String(!nome.value.trim()));
       if (!lines().length) {
         msg.textContent = 'Escolha pelo menos um serviço acima.';
         if (!reduced) gsap.fromTo('.opts', { x: -10 }, { x: 0, duration: 0.4, ease: 'elastic.out(1, 0.3)' });
@@ -944,14 +993,19 @@
       }
       return true;
     }
-    $('#f-nome').addEventListener('input', (e) => { if (e.target.value.trim()) e.target.closest('.field').classList.remove('is-error'); });
+    $('#f-nome').addEventListener('input', (e) => {
+      if (!e.target.value.trim()) return;
+      e.target.closest('.field').classList.remove('is-error');
+      e.target.setAttribute('aria-invalid', 'false');
+    });
 
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       if (!validate()) return;
       const url = waLink(buildMessage());
-      const win = window.open(url, '_blank', 'noopener');
-      if (!win) location.href = url;
+      // Com 'noopener', window.open sempre retorna null; por isso o opener é zerado à mão
+      const win = window.open(url, '_blank');
+      if (win) win.opener = null; else location.href = url;
       $('[data-form-msg]').textContent = 'Pedido pronto! Finalize o envio no WhatsApp.';
       toast('Abrindo o WhatsApp com o seu pedido…');
     });
@@ -1006,6 +1060,16 @@
       f.title = 'Player do Spotify';
       f.addEventListener('load', () => card.classList.add('is-loaded'));
     };
+    // Sem as APIs, a única pista de que alguém deu play num iframe é o foco ir para
+    // ele. Quando isso acontece, ele assume o áudio e pausa o resto.
+    const frameKeys = new Map();
+    let focusedKey = null;
+    setInterval(() => {
+      const k = frameKeys.get(document.activeElement) || null;
+      if (k && k !== focusedKey) Playback.claim(k);
+      focusedKey = k;
+    }, 400);
+
     function plainSpotify(card, key) {
       if ($('iframe', card)) return;
       const f = document.createElement('iframe');
@@ -1016,6 +1080,7 @@
       card.appendChild(f);
       // Sem API não dá para pausar: recarregar o iframe interrompe o áudio
       Playback.register(key, () => { f.src = f.src; });
+      frameKeys.set(f, key);
     }
     async function mountSpotify(card, i) {
       const key = `sp:${i}`;
@@ -1121,8 +1186,6 @@
         btn.dataset.cursor = 'play';
         btn.innerHTML = `<img src="https://i.ytimg.com/vi/${id}/hqdefault.jpg" alt="" loading="lazy"><span class="play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg></span>`;
         const key = `yt:${box.children.length}`;
-        const original = [...fig.childNodes];
-        original.push(btn);
         // Plano B sem API: voltar à miniatura derruba o iframe e interrompe o áudio
         const plainYoutube = () => {
           const f = document.createElement('iframe');
@@ -1132,6 +1195,7 @@
           f.allowFullscreen = true;
           fig.replaceChildren(f);
           Playback.register(key, () => fig.replaceChildren(btn));
+          frameKeys.set(f, key);
         };
         const apiPlayer = (YT) => {
           const holder = document.createElement('div');
@@ -1168,9 +1232,16 @@
 
   // ── Início ───────────────────────────────────────────────────────────────
   runLoader().then(() => {
-    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
-    idle(() => loadSculpture(), { timeout: 4000 });
-    heroIntro();
+    // A escultura 3D é pré-carregada com o navegador ocioso depois da abertura, para
+    // não travar a navegação mais tarde. Em economia de dados ou aparelhos com pouca
+    // memória, ela só carrega quando a seção se aproxima.
+    const preload = () => {
+      const c = navigator.connection;
+      if ((c && c.saveData) || (navigator.deviceMemory && navigator.deviceMemory <= 2)) return;
+      (window.requestIdleCallback || ((fn) => setTimeout(fn, 1500)))(() => loadSculpture(), { timeout: 6000 });
+    };
+    const intro = heroIntro();
+    if (intro) intro.eventCallback('onComplete', () => setTimeout(preload, 1200)); else setTimeout(preload, 2500);
     startFlames();
     ScrollTrigger.refresh();
   });

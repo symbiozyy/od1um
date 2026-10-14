@@ -134,7 +134,13 @@ function taperedTube(curve, rFn, seed, segs = 72, radial = 14) {
   return g;
 }
 
-export function mount(canvas, { reduced = false, mobile = false } = {}) {
+// Pausa entre as etapas da montagem, para o navegador atender cliques, áudio e
+// rolagem no meio (sem isso, montar a peça travava a página por segundos).
+const breathe = () => new Promise((r) => (window.requestIdleCallback
+  ? requestIdleCallback(() => r(), { timeout: 250 })
+  : setTimeout(r, 16)));
+
+export async function mount(canvas, { reduced = false, mobile = false } = {}) {
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile, powerPreference: 'high-performance' });
@@ -148,7 +154,9 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(BG);
+  await breathe();
   scene.environment = studioEnvironment(renderer);
+  await breathe();
 
   const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 500);
 
@@ -209,7 +217,7 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
   heartGroup.add(outline);
   piece.add(heartGroup);
 
-  // Coroa: arco cromado sobre o coração
+  await breathe();
   // Coroa: arco cromado achatado (elipse) assentado sobre os lóbulos
   const waist = heartAt(Math.PI / 2, Math.PI / 2).sub(hMid);
   const R = Math.abs(waist.x) * 1.1 + 0.6, SQ = 0.66, CY = waist.y * 1.1 + 0.25;
@@ -251,6 +259,7 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
     flames.add(m);
   }
 
+  await breathe();
   // Centraliza a peça inteira
   const bb = new THREE.Box3().setFromObject(piece);
   const mid = bb.getCenter(new THREE.Vector3());
@@ -296,6 +305,7 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
   })();
   root.add(halo);
 
+  await breathe();
   // ── Pós-processamento: bloom nos reflexos e na aura ─────────────────────
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
@@ -397,7 +407,8 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
     if (running) raf = requestAnimationFrame(frame);
   }
 
-  function start() { if (running) return; running = true; last = performance.now(); raf = requestAnimationFrame(frame); }
+  // Movimento reduzido: sem animação contínua; só redesenha quando a rolagem muda
+  function start() { if (running || reduced) return; running = true; last = performance.now(); raf = requestAnimationFrame(frame); }
   function stop() { running = false; cancelAnimationFrame(raf); }
 
   const ro = new ResizeObserver(resize);
@@ -406,10 +417,19 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
   root.position.set(layout.x, layout.y, 0);
   const io = new IntersectionObserver(([e]) => (e.isIntersecting ? start() : stop()), { rootMargin: '100px' });
   io.observe(canvas);
+  // Compila os shaders antes do primeiro quadro: em paralelo quando o navegador
+  // permite; senão, um objeto por vez, com pausas entre eles
   const parallel = renderer.compileAsync && renderer.extensions.has('KHR_parallel_shader_compile');
-  (parallel ? renderer.compileAsync(scene, camera) : Promise.resolve())
-    .catch(() => {})
-    .then(() => { ready = true; frame(performance.now()); });
+  if (parallel) {
+    await renderer.compileAsync(scene, camera).catch(() => {});
+  } else {
+    const seen = new Set();
+    const objs = [];
+    scene.traverse((o) => { if (o.material && !seen.has(o.material)) { seen.add(o.material); objs.push(o); } });
+    for (const o of objs) { renderer.compile(o, camera, scene); await breathe(); }
+  }
+  ready = true;
+  frame(performance.now());
 
   return {
     setProgress(p) { progress = p; if (!running) frame(performance.now()); },
