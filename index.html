@@ -220,8 +220,11 @@ section[id],footer[id]{scroll-margin-top:72px}
 .deck-title{font-family:var(--f-display);font-size:clamp(36px,4.6vw,60px);line-height:.95;text-transform:uppercase;margin:0}
 .deck-meta{font-family:var(--f-mono);font-size:12px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase;margin-top:8px}
 .deck-time{font-family:var(--f-mono);font-size:clamp(22px,2.4vw,30px);color:var(--acid-hi);font-variant-numeric:tabular-nums}
-.deck-progress{position:relative;height:6px;border-radius:6px;background:var(--line);overflow:hidden}
-.deck-progress b{position:absolute;inset:0;background:var(--acid-grad);transform:scaleX(0);transform-origin:left}
+.deck-progress{--p:0;position:relative;height:20px;cursor:pointer;touch-action:none}
+.deck-progress::before{content:"";position:absolute;left:0;right:0;top:7px;height:6px;border-radius:6px;background:var(--line)}
+.deck-progress b{position:absolute;left:0;right:0;top:7px;height:6px;border-radius:6px;background:var(--acid-grad);transform:scaleX(0);transform-origin:left}
+.deck-progress i{position:absolute;top:3px;left:calc(var(--p) * 100%);width:14px;height:14px;margin-left:-7px;border-radius:50%;background:var(--chrome-hi);box-shadow:0 0 12px rgba(198,236,128,.6);transform:scale(0);transition:transform .2s var(--ease-out)}
+.deck-progress:hover i,.deck-progress:focus-visible i,.is-playing .deck-progress i{transform:scale(1)}
 .deck-controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
 .ctrl{width:52px;height:52px;border-radius:50%;border:1px solid var(--line-2);display:grid;place-items:center;transition:background-color .15s,border-color .15s,transform .15s var(--ease-out)}
 .ctrl:hover{border-color:var(--chrome-lo);background:rgba(255,255,255,.04)}
@@ -587,7 +590,7 @@ section[id],footer[id]{scroll-margin-top:72px}
     <div class="section-head">
       <span class="label" data-reveal>03 / Beats</span>
       <h2 class="h2" data-split>Aperte <span class="acid-text">o play.</span></h2>
-      <p class="lead" data-reveal>Uma amostra da pressão. Escolha um loop e sinta o grave.</p>
+      <p class="lead" data-reveal>Uma amostra da pressão. Escolha um beat e sinta o grave.</p>
     </div>
     <div class="player" data-player data-reveal>
       <div class="deck">
@@ -602,7 +605,7 @@ section[id],footer[id]{scroll-margin-top:72px}
           </div>
           <div class="deck-time" data-time aria-live="off">00:00</div>
         </div>
-        <div class="deck-progress" aria-hidden="true"><b data-progress></b></div>
+        <div class="deck-progress" data-seek role="slider" tabindex="0" aria-label="Posição na faixa" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><b data-progress></b><i aria-hidden="true"></i></div>
         <div class="deck-controls">
           <button class="ctrl" type="button" data-prev aria-label="Faixa anterior"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 6.2v11.6a1 1 0 0 1-1.52.85L9.5 13.06a1.2 1.2 0 0 1 0-2.12l8.98-5.6A1 1 0 0 1 20 6.2z"/></svg></button>
           <button class="ctrl ctrl-play" type="button" data-play aria-label="Tocar"><svg class="i-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg><svg class="i-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></button>

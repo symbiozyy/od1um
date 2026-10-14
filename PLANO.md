@@ -64,11 +64,9 @@ mix & master, mentoria de lançamento e audiovisual (capas e identidade visual).
    - fixado na tela e girando conforme a rolagem
    - carregado só quando a seção se aproxima
 7. **Player de beats (funcional):**
-   - loops tocáveis com play, pausa, troca de faixa, barra de progresso e
-     visualizador
-   - os loops de demonstração são sintetizados ao vivo com Web Audio (808,
-     kick, caixa, hi-hats)
-   - basta preencher `src` com um arquivo de áudio para tocar beats reais
+   - beats reais da pasta `beats/`, com play, pausa, troca de faixa,
+     visualizador e barra de progresso clicável
+   - ao terminar uma faixa, segue para a próxima
 8. **Processo:** 4 etapas (Briefing → Produção → Captação & Mix → Lançamento),
    com rolagem horizontal fixada no desktop e lista vertical no celular.
 9. **Orçamentos (área de preços):**
@@ -128,8 +126,9 @@ mix & master, mentoria de lançamento e audiovisual (capas e identidade visual).
 - **Preços:** atributos `data-price` de cada card em `index.html`. Mude
   também o número que aparece no card (`data-num`). A calculadora lê os valores
   direto dos cards.
-- **Beats reais:** em `CONFIG.tracks`, preencha `src` com o caminho do áudio
-  (ex.: `beats/toxic.mp3`). Sem `src`, toca o loop sintetizado.
+- **Beats:** suba o MP3 na pasta `beats/` e acrescente uma linha em
+  `CONFIG.tracks` com título, BPM, duração e caminho
+  (ex.: `{ id: 'novo', title: 'NOVO', bpm: 140, dur: '2:30', src: 'beats/novo.mp3' }`).
 - **Testar localmente:** `npx http-server .` e abrir `http://localhost:8080/`. Para carregar a
   escultura 3D, o site precisa rodar num servidor; abrir o arquivo direto no
   navegador não funciona.

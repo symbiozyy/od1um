@@ -11,12 +11,16 @@
     instagram: '',   // usuário sem @ (ex.: "odium")
     email: '',
     currency: 'R$',  // ex.: "R$" ou "US$"
-    // Faixas do player. Com `src` (ex.: "beats/toxic.mp3") toca o arquivo;
-    // sem `src` toca o loop de demonstração sintetizado ao vivo.
+    // Beats do player (arquivos na pasta beats/). `dur` é a duração mostrada na lista.
     tracks: [
-      { id: 'toxic', title: 'Toxic', style: 'Trap', bpm: 140, key: 'F#m', src: '' },
-      { id: 'chrome', title: 'Chrome Heart', style: 'Drill', bpm: 142, key: 'Cm', src: '' },
-      { id: 'veneno', title: 'Veneno', style: 'Boom bap', bpm: 90, key: 'Am', src: '' },
+      { id: 'tezzus', title: 'TEZZUS', bpm: 140, dur: '2:31', src: 'beats/tezzus.mp3' },
+      { id: 'young-nudy', title: 'YOUNG NUDY', bpm: 140, dur: '2:31', src: 'beats/young-nudy.mp3' },
+      { id: 'drill-uk-medieval', title: 'DRILL UK MEDIEVAL', bpm: 141, dur: '2:37', src: 'beats/drill-uk-medieval.mp3' },
+      { id: 'blend', title: 'BLEND', bpm: 145, dur: '2:12', src: 'beats/blend.mp3' },
+      { id: 'jerk-drill-ny', title: 'JERK DRILL NY', bpm: 146, dur: '2:38', src: 'beats/jerk-drill-ny.mp3' },
+      { id: 'rage-cyber', title: 'RAGE CYBER', bpm: 150, dur: '2:21', src: 'beats/rage-cyber.mp3' },
+      { id: 'diamond', title: 'DIAMOND', bpm: 157, dur: '2:02', src: 'beats/diamond.mp3' },
+      { id: 'yeh-yeh', title: 'YEH YEH', bpm: 192, dur: '2:00', src: 'beats/yeh-yeh.mp3' },
     ],
     // Músicas produzidas pela ODIUM: cole o link de compartilhamento do Spotify.
     spotify: [
@@ -85,241 +89,67 @@
   gsap.set(toastEl, { xPercent: -50, yPercent: 140 });
 
   // ════════════════════════════════════════════════════════════════════════
-  // ÁUDIO: motor Web Audio compartilhado pelo player e pelos visualizadores
+  // ÁUDIO: toca os beats e alimenta o analisador dos visualizadores
   // ════════════════════════════════════════════════════════════════════════
   const Engine = (() => {
-    let ctx, comp, master, analyser, delay, delayFb, noise, bus;
-    let freq, wave;
-    let playing = false, track = null, step = 0, nextTime = 0, timer = 0, startedAt = 0;
-    let volume = 0.8;
+    let ctx, master, analyser, freq, wave;
+    let playing = false, track = null, volume = 0.8, endedCb = null;
     const media = new Map();
-
-    const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
     function init() {
       if (ctx) return;
       ctx = new (window.AudioContext || window.webkitAudioContext)();
-      comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -16; comp.knee.value = 10; comp.ratio.value = 4;
-      comp.attack.value = 0.004; comp.release.value = 0.18;
       master = ctx.createGain(); master.gain.value = volume;
       analyser = ctx.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.78;
-      comp.connect(master); master.connect(analyser); analyser.connect(ctx.destination);
-      delay = ctx.createDelay(1); delayFb = ctx.createGain(); delayFb.gain.value = 0.32;
-      const dlp = ctx.createBiquadFilter(); dlp.type = 'lowpass'; dlp.frequency.value = 2600;
-      delay.connect(dlp); dlp.connect(delayFb); delayFb.connect(delay);
-      const dOut = ctx.createGain(); dOut.gain.value = 0.5; dlp.connect(dOut); dOut.connect(comp);
-      noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
-      const d = noise.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      master.connect(analyser); analyser.connect(ctx.destination);
       freq = new Uint8Array(analyser.frequencyBinCount);
       wave = new Uint8Array(analyser.fftSize);
     }
 
-    const shaperCurve = (() => {
-      const n = 1024, c = new Float32Array(n), k = 6;
-      for (let i = 0; i < n; i++) { const x = (i / n) * 2 - 1; c[i] = ((1 + k) * x) / (1 + k * Math.abs(x)); }
-      return c;
-    })();
-
-    function env(g, t, peak, a, dec) {
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(peak, t + a);
-      g.gain.exponentialRampToValueAtTime(0.0001, t + a + dec);
-    }
-    function noiseSrc(t, dur) {
-      const s = ctx.createBufferSource(); s.buffer = noise;
-      s.start(t, Math.random() * 0.5); s.stop(t + dur);
-      return s;
-    }
-
-    // Instrumentos
-    function kick(t, v = 1) {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = 'sine';
-      o.frequency.setValueAtTime(160, t);
-      o.frequency.exponentialRampToValueAtTime(44, t + 0.12);
-      env(g, t, v, 0.003, 0.42);
-      o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.5);
-      const n = noiseSrc(t, 0.02), hp = ctx.createBiquadFilter(), ng = ctx.createGain();
-      hp.type = 'highpass'; hp.frequency.value = 2500; env(ng, t, 0.25 * v, 0.001, 0.015);
-      n.connect(hp); hp.connect(ng); ng.connect(bus);
-    }
-    function bass(t, note, dur, glideFrom, v = 0.9) {
-      const o = ctx.createOscillator(), g = ctx.createGain(), sh = ctx.createWaveShaper(), lp = ctx.createBiquadFilter();
-      o.type = 'sine';
-      if (glideFrom != null) {
-        o.frequency.setValueAtTime(mtof(glideFrom), t);
-        o.frequency.exponentialRampToValueAtTime(mtof(note), t + 0.09);
-      } else {
-        o.frequency.setValueAtTime(mtof(note) * 1.6, t);
-        o.frequency.exponentialRampToValueAtTime(mtof(note), t + 0.03);
-      }
-      sh.curve = shaperCurve; lp.type = 'lowpass'; lp.frequency.value = 900;
-      g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(v, t + 0.006);
-      g.gain.setValueAtTime(v, t + Math.max(0.02, dur - 0.08));
-      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(sh); sh.connect(lp); lp.connect(g); g.connect(bus);
-      o.start(t); o.stop(t + dur + 0.02);
-    }
-    function snare(t, v = 0.7, clap = false) {
-      const hits = clap ? [0, 0.011, 0.022] : [0];
-      hits.forEach((off, i) => {
-        const n = noiseSrc(t + off, 0.3), bp = ctx.createBiquadFilter(), g = ctx.createGain();
-        bp.type = clap ? 'bandpass' : 'highpass'; bp.frequency.value = clap ? 1500 : 1300; bp.Q.value = clap ? 0.9 : 0.7;
-        env(g, t + off, v * (i === hits.length - 1 ? 1 : 0.6), 0.001, i === hits.length - 1 ? 0.22 : 0.012);
-        n.connect(bp); bp.connect(g); g.connect(bus);
-      });
-      if (!clap) {
-        const o = ctx.createOscillator(), g = ctx.createGain();
-        o.type = 'triangle'; o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(160, t + 0.08);
-        env(g, t, v * 0.5, 0.001, 0.1); o.connect(g); g.connect(bus); o.start(t); o.stop(t + 0.15);
-      }
-    }
-    function hat(t, v = 0.22, open = false) {
-      const n = noiseSrc(t, open ? 0.3 : 0.06), hp = ctx.createBiquadFilter(), g = ctx.createGain();
-      hp.type = 'highpass'; hp.frequency.value = 7600;
-      env(g, t, v, 0.001, open ? 0.22 : 0.035);
-      n.connect(hp); hp.connect(g); g.connect(bus);
-    }
-    function pluck(t, note, dur, v = 0.16, bright = 3200, send = 0.4) {
-      const o1 = ctx.createOscillator(), o2 = ctx.createOscillator(), g = ctx.createGain(), lp = ctx.createBiquadFilter();
-      o1.type = 'triangle'; o2.type = 'sine';
-      o1.frequency.value = mtof(note); o2.frequency.value = mtof(note + 12); o2.detune.value = 6;
-      lp.type = 'lowpass'; lp.frequency.setValueAtTime(bright, t); lp.frequency.exponentialRampToValueAtTime(500, t + dur);
-      env(g, t, v, 0.004, dur);
-      const g2 = ctx.createGain(); g2.gain.value = 0.35;
-      o1.connect(lp); o2.connect(g2); g2.connect(lp); lp.connect(g); g.connect(bus);
-      const s = ctx.createGain(); s.gain.value = send; g.connect(s); s.connect(delay);
-      o1.start(t); o2.start(t); o1.stop(t + dur + 0.05); o2.stop(t + dur + 0.05);
-    }
-    function keys(t, notes, dur, v = 0.07) {
-      notes.forEach((n) => pluck(t, n, dur, v, 1800, 0.25));
-    }
-    function crackle(t) {
-      if (Math.random() > 0.35) return;
-      const n = noiseSrc(t, 0.01), hp = ctx.createBiquadFilter(), g = ctx.createGain();
-      hp.type = 'highpass'; hp.frequency.value = 3000; env(g, t, 0.05 + Math.random() * 0.05, 0.0005, 0.006);
-      n.connect(hp); hp.connect(g); g.connect(bus);
-    }
-
-    // Padrões de 2 compassos (32 semicolcheias)
-    const P = {
-      toxic: {
-        swing: 0,
-        kick: 'x......x..x.....x.....x...x..x..',
-        snare: '........x...............x.......',
-        hat: 'x.x.x.x.x.x.x.x.x.x.x.r.x.x.ttx.',
-        open: '..............................o.',
-        bass: [{ s: 0, n: 42, d: 7 }, { s: 7, n: 42, d: 3 }, { s: 10, n: 45, d: 6 }, { s: 16, n: 42, d: 6 }, { s: 22, n: 49, d: 4, g: 42 }, { s: 26, n: 47, d: 3 }, { s: 29, n: 45, d: 3 }],
-        lead: [[0, 73], [3, 69], [6, 66], [8, 76], [11, 73], [14, 69], [16, 74], [19, 69], [22, 66], [24, 73], [27, 69], [30, 64]],
-      },
-      chrome: {
-        swing: 0,
-        kick: 'x.........x.....x.......x.....x.',
-        snare: '........x.............x.x.......',
-        hat: 'x..x..x.x..x.x..x..x..x.x.tx..x.',
-        open: '',
-        bass: [{ s: 0, n: 36, d: 6 }, { s: 6, n: 43, d: 4, g: 36 }, { s: 10, n: 39, d: 6, g: 43 }, { s: 16, n: 36, d: 5 }, { s: 21, n: 34, d: 3 }, { s: 24, n: 41, d: 4, g: 34 }, { s: 28, n: 39, d: 4 }],
-        lead: [[0, 72], [2, 75], [4, 74], [6, 67], [8, 72], [10, 75], [12, 74], [14, 68], [16, 72], [18, 75], [20, 74], [22, 67], [24, 70], [26, 68], [28, 67], [30, 63]],
-      },
-      veneno: {
-        swing: 0.16,
-        kick: 'x.......x.x.....x..x......x.....',
-        snare: '....x.......x.......x.......x..x',
-        hat: 'x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.',
-        open: '',
-        bass: [{ s: 0, n: 45, d: 3 }, { s: 3, n: 45, d: 2 }, { s: 8, n: 48, d: 3 }, { s: 10, n: 47, d: 4 }, { s: 16, n: 45, d: 3 }, { s: 19, n: 52, d: 2 }, { s: 24, n: 50, d: 3 }, { s: 26, n: 48, d: 4 }],
-        chords: [[0, [57, 60, 64, 67], 6], [6, [57, 60, 64, 67], 2], [16, [53, 57, 60, 64], 6], [22, [52, 55, 59, 62], 8]],
-        crackle: true,
-      },
-    };
-
-    function schedule(i, t) {
-      const p = P[track.id];
-      if (!p) return;
-      const s16 = 60 / track.bpm / 4;
-      if (p.swing && i % 2) t += p.swing * s16;
-      if (p.kick[i] === 'x') kick(t, 1);
-      if (p.snare[i] === 'x') snare(t, 0.7, track.id !== 'veneno');
-      const h = p.hat[i];
-      if (h === 'x') hat(t, i % 4 === 0 ? 0.24 : 0.16);
-      else if (h === 'r') { hat(t, 0.16); hat(t + s16 / 2, 0.12); }
-      else if (h === 't') { for (let k = 0; k < 3; k++) hat(t + (s16 / 3) * k, 0.1 + k * 0.03); }
-      if (p.open && p.open[i] === 'o') hat(t, 0.16, true);
-      for (const b of p.bass) if (b.s === i) bass(t, b.n, b.d * s16, b.g);
-      if (p.lead) for (const [s, n] of p.lead) if (s === i) pluck(t, n, s16 * 3, track.id === 'chrome' ? 0.12 : 0.15, track.id === 'chrome' ? 2400 : 3600);
-      if (p.chords) for (const [s, ns, d] of p.chords) if (s === i) keys(t, ns, d * s16);
-      if (p.crackle) crackle(t + Math.random() * s16);
-    }
-
-    function tick() {
-      const s16 = 60 / track.bpm / 4;
-      while (nextTime < ctx.currentTime + 0.12) {
-        schedule(step, nextTime);
-        nextTime += s16;
-        step = (step + 1) % 32;
-      }
-    }
-
-    function stopBus() {
-      if (!bus) return;
-      const old = bus;
-      old.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
-      setTimeout(() => old.disconnect(), 400);
-      bus = null;
-    }
-
     function getMedia(t) {
       if (!media.has(t.id)) {
-        const el = new Audio(t.src);
-        el.crossOrigin = 'anonymous'; el.loop = true; el.preload = 'auto';
+        const el = new Audio();
+        el.crossOrigin = 'anonymous'; el.preload = 'auto'; el.src = t.src;
         const node = ctx.createMediaElementSource(el);
+        node.connect(master);
+        el.addEventListener('ended', () => {
+          if (track && track.id === t.id) { playing = false; endedCb && endedCb(); }
+        });
         media.set(t.id, { el, node });
       }
       return media.get(t.id);
     }
+    const el = () => (track && media.has(track.id) ? media.get(track.id).el : null);
 
+    // Mesma faixa: continua de onde parou. Outra faixa: começa do início.
     async function play(t) {
       init();
       if (ctx.state === 'suspended') await ctx.resume();
+      const same = track && track.id === t.id;
       stop();
       track = t;
-      bus = ctx.createGain(); bus.gain.value = 1; bus.connect(comp);
-      if (t.src) {
-        const m = getMedia(t);
-        m.node.disconnect(); m.node.connect(bus);
-        m.el.currentTime = 0;
-        try { await m.el.play(); } catch (e) { stopBus(); throw e; }
-      } else {
-        delay.delayTime.value = (60 / t.bpm) * 0.75;
-        step = 0; nextTime = ctx.currentTime + 0.06;
-        tick();
-        timer = setInterval(tick, 25);
-      }
-      startedAt = ctx.currentTime;
+      const m = getMedia(t);
+      if (!same || m.el.ended) m.el.currentTime = 0;
+      await m.el.play();
       playing = true;
     }
 
     function stop() {
-      clearInterval(timer); timer = 0;
-      if (track && track.src && media.has(track.id)) media.get(track.id).el.pause();
-      stopBus();
+      const e = el();
+      if (e) e.pause();
       playing = false;
     }
 
     return {
       play, stop,
       get playing() { return playing; },
+      get trackId() { return track ? track.id : null; },
+      set onEnded(fn) { endedCb = fn; },
       setVolume(v) { volume = v; if (master) master.gain.setTargetAtTime(v, ctx.currentTime, 0.02); },
-      elapsed() { return playing ? ctx.currentTime - startedAt : 0; },
-      loopProgress() {
-        if (!playing || !track) return 0;
-        if (track.src) { const el = media.get(track.id).el; return el.duration ? el.currentTime / el.duration : 0; }
-        const loop = (60 / track.bpm) * 8;
-        return ((ctx.currentTime - startedAt) % loop) / loop;
-      },
+      seek(ratio) { const e = el(); if (e && e.duration) e.currentTime = Math.min(e.duration - 0.05, Math.max(0, ratio * e.duration)); },
+      nudge(sec) { const e = el(); if (e && e.duration) e.currentTime = Math.min(e.duration - 0.05, Math.max(0, e.currentTime + sec)); },
+      elapsed() { const e = el(); return e ? e.currentTime : 0; },
+      progress() { const e = el(); return e && e.duration ? e.currentTime / e.duration : 0; },
       // Energia dos graves (0 a 1) para o coração 3D e o fundo do herói pulsarem
       level() {
         if (!playing || !analyser) return 0;
@@ -766,7 +596,7 @@
         <span><span class="track-name"></span><span class="track-meta"></span></span>
         <span class="track-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span></button>`;
       $('.track-name', li).textContent = t.title;
-      $('.track-meta', li).textContent = `${t.style} · ${t.bpm} BPM · ${t.key}`;
+      $('.track-meta', li).textContent = `${t.bpm} BPM · ${t.dur}`;
       list.appendChild(li);
     });
     const btns = $$('.track', list);
@@ -776,7 +606,7 @@
       const t = CONFIG.tracks[cur];
       btns.forEach((b, k) => b.setAttribute('aria-current', String(k === cur)));
       const title = $('[data-title]', root);
-      $('[data-meta]', root).textContent = `${t.style} · ${t.key}`;
+      $('[data-meta]', root).textContent = `Beat ODIUM · ${t.dur}`;
       $('[data-bpm]', root).textContent = `${t.bpm} BPM`;
       if (title.textContent !== t.title) {
         gsap.timeline()
@@ -828,6 +658,33 @@
     // Para o som ao sair da aba
     document.addEventListener('visibilitychange', () => { if (document.hidden && Engine.playing) { Engine.stop(); setPlaying(false); Playback.release('beats'); } });
 
+    // Fim da faixa: segue para a próxima
+    Engine.onEnded = () => {
+      setPlaying(false);
+      Playback.release('beats');
+      playTrack(CONFIG.tracks.findIndex((t) => t.id === Engine.trackId) + 1);
+    };
+
+    // Barra de progresso: clicar ou arrastar muda a posição; setas avançam 5 s
+    const seekBar = $('[data-seek]', root);
+    const isLoaded = () => Engine.trackId === CONFIG.tracks[cur].id;
+    const ratioAt = (e) => { const r = seekBar.getBoundingClientRect(); return Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+    let dragging = false;
+    seekBar.addEventListener('pointerdown', async (e) => {
+      const ratio = ratioAt(e);
+      dragging = true;
+      seekBar.setPointerCapture(e.pointerId);
+      if (!isLoaded() || !Engine.playing) await playTrack(cur);
+      Engine.seek(ratio);
+    });
+    seekBar.addEventListener('pointermove', (e) => { if (dragging && isLoaded()) Engine.seek(ratioAt(e)); });
+    seekBar.addEventListener('pointerup', () => { dragging = false; });
+    seekBar.addEventListener('keydown', (e) => {
+      if (!isLoaded()) return;
+      if (e.key === 'ArrowRight') { e.preventDefault(); Engine.nudge(5); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); Engine.nudge(-5); }
+    });
+
     show(0);
 
     // Osciloscópio + barras
@@ -865,9 +722,12 @@
       }
       sx.strokeStyle = 'rgba(244,244,242,0.85)'; sx.lineWidth = 1.6; sx.stroke();
       idleT += reduced ? 0 : 0.016;
-      const el = Engine.elapsed();
-      timeEl.textContent = `${String(Math.floor(el / 60)).padStart(2, '0')}:${String(Math.floor(el % 60)).padStart(2, '0')}`;
-      progEl.style.transform = `scaleX(${Engine.loopProgress().toFixed(4)})`;
+      const loaded = isLoaded();
+      const el = loaded ? Engine.elapsed() : 0, p = loaded ? Engine.progress() : 0;
+      timeEl.textContent = `${Math.floor(el / 60)}:${String(Math.floor(el % 60)).padStart(2, '0')} / ${CONFIG.tracks[cur].dur}`;
+      progEl.style.transform = `scaleX(${p.toFixed(4)})`;
+      seekBar.style.setProperty('--p', p.toFixed(4));
+      seekBar.setAttribute('aria-valuenow', Math.round(p * 100));
     }
     gsap.ticker.add(draw);
   })();
