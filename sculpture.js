@@ -330,8 +330,10 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
     render();
   }
 
+  // Só desenha depois que os shaders estiverem compilados (sem travar a página)
+  let ready = false;
   function render() {
-    composer.render();
+    if (ready) composer.render();
   }
 
   // Batida "tum-tum" do coração
@@ -400,7 +402,10 @@ export function mount(canvas, { reduced = false, mobile = false } = {}) {
   root.position.set(layout.x, layout.y, 0);
   const io = new IntersectionObserver(([e]) => (e.isIntersecting ? start() : stop()), { rootMargin: '100px' });
   io.observe(canvas);
-  frame(performance.now());
+  const parallel = renderer.compileAsync && renderer.extensions.has('KHR_parallel_shader_compile');
+  (parallel ? renderer.compileAsync(scene, camera) : Promise.resolve())
+    .catch(() => {})
+    .then(() => { ready = true; frame(performance.now()); });
 
   return {
     setProgress(p) { progress = p; if (!running) frame(performance.now()); },

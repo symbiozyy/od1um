@@ -49,7 +49,7 @@
   const finePointer = matchMedia('(hover: hover) and (pointer: fine)').matches;
   const isMobile = () => innerWidth < 760;
 
-  gsap.registerPlugin(ScrollTrigger, SplitText);
+  gsap.registerPlugin(ScrollTrigger, SplitText, ScrollToPlugin);
   // Personalidade de movimento: energética nas interações, premium nas revelações
   gsap.defaults({ ease: 'expo.out', duration: 0.45 });
 
@@ -298,6 +298,24 @@
   }
   burger.addEventListener('click', () => setMenu(!menuOpen));
   $$('a', menu).forEach((a) => a.addEventListener('click', () => setMenu(false)));
+
+  // Links internos (#beats, #orcamentos…): rolagem suave pelo GSAP. A rolagem suave
+  // do CSS (scroll-behavior) atrapalha as medições do ScrollTrigger e fazia a seção
+  // fixada do Processo aparecer por cima de outras seções.
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('a[href^="#"]');
+    if (!a || a.classList.contains('skip') || e.defaultPrevented) return;
+    const id = a.getAttribute('href');
+    const target = id.length > 1 && document.querySelector(id);
+    if (!target) return;
+    e.preventDefault();
+    const y = id === '#inicio' ? 0 : target;
+    gsap.to(window, {
+      scrollTo: { y, offsetY: id === '#inicio' ? 0 : 72, autoKill: false },
+      duration: reduced ? 0 : 1.1, ease: 'power3.inOut', overwrite: true,
+    });
+    history.pushState(null, '', id);
+  });
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && menuOpen) setMenu(false); });
   addEventListener('resize', () => { if (menuOpen && innerWidth >= 960) setMenu(false); });
 
@@ -526,7 +544,7 @@
   // ════════════════════════════════════════════════════════════════════════
   // MANIFESTO + ESCULTURA 3D
   // ════════════════════════════════════════════════════════════════════════
-  let sculpture = null;
+  let sculpture = null, loadSculpture = () => {};
   (function manifesto() {
     const sec = $('#manifesto');
     const lines = $$('.m-line', sec);
@@ -555,9 +573,12 @@
       tl.to({}, { duration: 0.6 });
     }
 
-    // Three.js só carrega quando a seção se aproxima
-    const io = new IntersectionObserver(([e]) => {
-      if (!e.isIntersecting) return;
+    // Three.js carrega quando o navegador fica ocioso depois da abertura,
+    // ou antes disso se a seção se aproximar
+    let started = false;
+    loadSculpture = () => {
+      if (started) return;
+      started = true;
       io.disconnect();
       import('./sculpture.js')
         .then((m) => {
@@ -571,7 +592,8 @@
           gsap.from(canvas, { opacity: 0, scale: 0.92, duration: 1.4, ease: 'expo.out' });
         })
         .catch(() => { sec.classList.add('no-webgl'); });
-    }, { rootMargin: '600px 0px' });
+    };
+    const io = new IntersectionObserver(([e]) => { if (e.isIntersecting) loadSculpture(); }, { rootMargin: '1200px 0px' });
     io.observe(sec);
   })();
 
@@ -1147,6 +1169,8 @@
 
   // ── Início ───────────────────────────────────────────────────────────────
   runLoader().then(() => {
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1200));
+    idle(() => loadSculpture(), { timeout: 4000 });
     heroIntro();
     startFlames();
     ScrollTrigger.refresh();
