@@ -1292,4 +1292,15 @@
     ScrollTrigger.refresh();
   });
   document.fonts && document.fonts.ready.then(() => ScrollTrigger.refresh());
+  // Recalcula as posições da rolagem sempre que a altura da página muda (fontes,
+  // players do Spotify, imagens que carregam depois). Sem isso, a seção fixada do
+  // Processo pode começar antes da hora e cobrir a seção Produções.
+  let lastH = 0, refreshTimer = 0;
+  new ResizeObserver(() => {
+    const h = document.body.scrollHeight;
+    if (Math.abs(h - lastH) < 2) return;
+    lastH = h;
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => ScrollTrigger.refresh(), 200);
+  }).observe(document.body);
 })();
