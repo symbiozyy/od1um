@@ -29,7 +29,13 @@
     // Clipes: link do YouTube ou arquivo de vídeo próprio. Vazio esconde a seção.
     // Ex.: { title: 'Nome do clipe', youtube: 'https://youtu.be/XXXXXXXXXXX' }
     //      { title: 'Nome do clipe', src: 'videos/clipe.mp4', poster: 'videos/capa.jpg' }
-    videos: [],
+    videos: [
+      { title: '', youtube: 'https://www.youtube.com/watch?v=OK1iIq3l8oU' },
+      { title: '', youtube: 'https://www.youtube.com/watch?v=7Ql6cK3SWOc' },
+      { title: '', youtube: 'https://www.youtube.com/watch?v=lLHIQOyoLhE' },
+      { title: '', youtube: 'https://www.youtube.com/watch?v=3HmsW286xEw' },
+      { title: '', youtube: 'https://www.youtube.com/watch?v=CWYTnLPrp5A' },
+    ],
   };
 
   const $ = (s, r = document) => r.querySelector(s);
