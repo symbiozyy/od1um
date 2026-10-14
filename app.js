@@ -332,6 +332,25 @@
     };
   })();
 
+  // Coordenador de reprodução: só um áudio toca por vez (beat, Spotify, YouTube ou MP4)
+  const Playback = (() => {
+    const pausers = new Map();
+    const active = new Set();
+    return {
+      register(key, pause) { pausers.set(key, pause); },
+      // Quem começa a tocar chama claim: tudo o que estava tocando é pausado
+      claim(key) {
+        [...active].forEach((k) => {
+          if (k === key) return;
+          active.delete(k);
+          try { pausers.get(k)?.(); } catch (e) { /* player já destruído */ }
+        });
+        active.add(key);
+      },
+      release(key) { active.delete(key); },
+    };
+  })();
+
   let audioLevel = 0;
   gsap.ticker.add(() => { audioLevel = Engine.level(); });
 
@@ -773,19 +792,23 @@
       if (lab) lab.textContent = on ? 'PAUSE' : 'PLAY';
     }
 
+    Playback.register('beats', () => { Engine.stop(); setPlaying(false); });
+
     async function playTrack(i) {
       show(i);
+      Playback.claim('beats');
       try {
         await Engine.play(CONFIG.tracks[cur]);
         setPlaying(true);
         gsap.fromTo(playBtn, { scale: 0.9 }, { scale: 1, duration: 0.5, ease: 'back.out(3)' });
       } catch (e) {
         setPlaying(false);
+        Playback.release('beats');
         toast('Não foi possível tocar esta faixa.');
       }
     }
     function toggle() {
-      if (Engine.playing) { Engine.stop(); setPlaying(false); } else playTrack(cur);
+      if (Engine.playing) { Engine.stop(); setPlaying(false); Playback.release('beats'); } else playTrack(cur);
     }
 
     playBtn.addEventListener('click', toggle);
@@ -803,7 +826,7 @@
       if (r.top < innerHeight && r.bottom > 0) { e.preventDefault(); toggle(); }
     });
     // Para o som ao sair da aba
-    document.addEventListener('visibilitychange', () => { if (document.hidden && Engine.playing) { Engine.stop(); setPlaying(false); } });
+    document.addEventListener('visibilitychange', () => { if (document.hidden && Engine.playing) { Engine.stop(); setPlaying(false); Playback.release('beats'); } });
 
     show(0);
 
@@ -1079,20 +1102,62 @@
     ids.forEach(([kind, id]) => {
       const card = document.createElement('div');
       card.className = 'sp-card';
-      card.dataset.src = `https://open.spotify.com/embed/${kind}/${id}?utm_source=generator&theme=0`;
+      card.dataset.kind = kind;
+      card.dataset.id = id;
       sp.appendChild(card);
     });
+
+    // A API oficial do Spotify permite pausar o player e saber quando ele toca.
+    // Se ela não carregar, cai para o iframe simples (que só é pausado recarregando).
+    let spApi;
+    const loadSpotifyApi = () => spApi || (spApi = new Promise((resolve) => {
+      window.onSpotifyIframeApiReady = (api) => resolve(api);
+      const sc = document.createElement('script');
+      sc.src = 'https://open.spotify.com/embed/iframe-api/v1';
+      sc.async = true;
+      sc.onerror = () => resolve(null);
+      document.head.appendChild(sc);
+      setTimeout(() => resolve(null), 6000);
+    }));
+    const markLoaded = (card) => {
+      const f = $('iframe', card);
+      if (!f) return;
+      f.title = 'Player do Spotify';
+      f.addEventListener('load', () => card.classList.add('is-loaded'));
+    };
+    function plainSpotify(card, key) {
+      if ($('iframe', card)) return;
+      const f = document.createElement('iframe');
+      f.src = `https://open.spotify.com/embed/${card.dataset.kind}/${card.dataset.id}?utm_source=generator&theme=0`;
+      f.title = 'Player do Spotify';
+      f.allow = 'autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
+      f.addEventListener('load', () => card.classList.add('is-loaded'));
+      card.appendChild(f);
+      // Sem API não dá para pausar: recarregar o iframe interrompe o áudio
+      Playback.register(key, () => { f.src = f.src; });
+    }
+    async function mountSpotify(card, i) {
+      const key = `sp:${i}`;
+      const api = await loadSpotifyApi();
+      if (!api) return plainSpotify(card, key);
+      const holder = document.createElement('div');
+      card.appendChild(holder);
+      api.createController(holder, {
+        uri: `spotify:${card.dataset.kind}:${card.dataset.id}`, width: '100%', height: 152, theme: 'dark',
+      }, (ctrl) => {
+        markLoaded(card);
+        Playback.register(key, () => ctrl.pause());
+        ctrl.addListener('playback_update', (e) => {
+          if (e.data && e.data.isPaused === false) Playback.claim(key);
+          else Playback.release(key);
+        });
+      });
+    }
     const spIO = new IntersectionObserver((entries) => {
       entries.forEach((e) => {
         if (!e.isIntersecting) return;
         spIO.unobserve(e.target);
-        const f = document.createElement('iframe');
-        f.src = e.target.dataset.src;
-        f.title = 'Player do Spotify';
-        f.allow = 'autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
-        f.loading = 'lazy';
-        f.addEventListener('load', () => e.target.classList.add('is-loaded'));
-        e.target.appendChild(f);
+        mountSpotify(e.target, $$('.sp-card', sp).indexOf(e.target));
       });
     }, { rootMargin: '400px 0px' });
     $$('.sp-card', sp).forEach((c) => spIO.observe(c));
@@ -1134,6 +1199,21 @@
     // Clipes: miniatura leve; o player do YouTube só carrega ao clicar
     const vids = CONFIG.videos.filter((v) => v.youtube || v.src);
     if (!vids.length) return;
+    // API do YouTube: carregada quando a seção se aproxima, para o clique ser imediato
+    let ytApi;
+    const loadYoutubeApi = () => ytApi || (ytApi = new Promise((resolve) => {
+      if (window.YT && window.YT.Player) return resolve(window.YT);
+      window.onYouTubeIframeAPIReady = () => resolve(window.YT);
+      const sc = document.createElement('script');
+      sc.src = 'https://www.youtube.com/iframe_api';
+      sc.async = true;
+      sc.onerror = () => resolve(null);
+      document.head.appendChild(sc);
+      setTimeout(() => resolve(window.YT && window.YT.Player ? window.YT : null), 6000);
+    }));
+    new IntersectionObserver((entries, io) => {
+      if (entries.some((e) => e.isIntersecting)) { io.disconnect(); loadYoutubeApi(); }
+    }, { rootMargin: '600px 0px' }).observe($('[data-videos-wrap]'));
     $('[data-videos-wrap]').hidden = false;
     const box = $('[data-videos]');
     const ytId = (u) => (/(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/.exec(u) || [])[1] || (/^[A-Za-z0-9_-]{11}$/.test(u) ? u : '');
@@ -1145,6 +1225,11 @@
         const el = document.createElement('video');
         el.src = v.src; el.controls = true; el.preload = 'metadata'; el.playsInline = true;
         if (v.poster) el.poster = v.poster;
+        const key = `mp4:${box.children.length}`;
+        Playback.register(key, () => el.pause());
+        el.addEventListener('play', () => Playback.claim(key));
+        el.addEventListener('pause', () => Playback.release(key));
+        el.addEventListener('ended', () => Playback.release(key));
         fig.appendChild(el);
       } else {
         const id = ytId(v.youtube);
@@ -1154,14 +1239,40 @@
         btn.setAttribute('aria-label', `Assistir ${v.title || 'clipe'}`);
         btn.dataset.cursor = 'play';
         btn.innerHTML = `<img src="https://i.ytimg.com/vi/${id}/hqdefault.jpg" alt="" loading="lazy"><span class="play"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg></span>`;
-        btn.addEventListener('click', () => {
-          if (Engine.playing) { Engine.stop(); $('[data-player]').classList.remove('is-playing'); }
+        const key = `yt:${box.children.length}`;
+        const original = [...fig.childNodes];
+        original.push(btn);
+        // Plano B sem API: voltar à miniatura derruba o iframe e interrompe o áudio
+        const plainYoutube = () => {
           const f = document.createElement('iframe');
           f.src = `https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0`;
           f.title = v.title || 'Clipe';
           f.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen';
           f.allowFullscreen = true;
           fig.replaceChildren(f);
+          Playback.register(key, () => fig.replaceChildren(btn));
+        };
+        const apiPlayer = (YT) => {
+          const holder = document.createElement('div');
+          fig.replaceChildren(holder);
+          const player = new YT.Player(holder, {
+            host: 'https://www.youtube-nocookie.com', videoId: id,
+            playerVars: { autoplay: 1, rel: 0, playsinline: 1 },
+            events: {
+              onReady: (ev) => { ev.target.playVideo(); const f = ev.target.getIframe(); if (f && v.title) f.title = v.title; },
+              onStateChange: (ev) => {
+                if (ev.data === 1) Playback.claim(key);
+                else if (ev.data === 2 || ev.data === 0) Playback.release(key);
+              },
+            },
+          });
+          Playback.register(key, () => player.pauseVideo());
+        };
+        btn.addEventListener('click', async () => {
+          Playback.claim(key);
+          const ready = window.YT && window.YT.Player;
+          const YT = ready ? window.YT : await loadYoutubeApi();
+          if (YT) apiPlayer(YT); else plainYoutube();
         });
         fig.appendChild(btn);
       }
